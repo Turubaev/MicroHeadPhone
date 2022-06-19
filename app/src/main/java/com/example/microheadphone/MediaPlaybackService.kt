@@ -1,6 +1,5 @@
 package com.example.microheadphone
 
-import android.R
 import android.app.PendingIntent
 import android.content.Intent
 import android.media.MediaPlayer
@@ -12,18 +11,21 @@ import android.view.KeyEvent
 import android.widget.Toast
 import androidx.media.MediaBrowserServiceCompat
 import androidx.media.session.MediaButtonReceiver
-import java.io.File
 
 private const val MY_MEDIA_ROOT_ID = "media_root_id"
 private const val MY_EMPTY_MEDIA_ROOT_ID = "empty_root_id"
 
-class MediaPlaybackService() : MediaBrowserServiceCompat() {
+class MediaPlaybackService : MediaBrowserServiceCompat() {
 
     var mediaSession: MediaSessionCompat? = null
     private lateinit var stateBuilder: PlaybackStateCompat.Builder
 
-    private val mMediaPlayer = MediaPlayer()
+    private var mMediaPlayer = MediaPlayer()
     private var isPaused = false
+    private var shouldWait = false
+    private var isDoubleClicked = false
+    private var recordIndex = 0
+    private var records: List<String> = listOf()
 
     private val mediaSessionCompatCallBack: MediaSessionCompat.Callback = object : MediaSessionCompat.Callback() {
         override fun onPlay() {
@@ -42,6 +44,18 @@ class MediaPlaybackService() : MediaBrowserServiceCompat() {
 
         override fun onSkipToNext() {
             super.onSkipToNext()
+
+            recordIndex += 1
+            if (recordIndex >= records.size) {
+                recordIndex = 0
+            }
+
+            mMediaPlayer.release()
+            mMediaPlayer = MediaPlayer()
+            mMediaPlayer.setDataSource(records[recordIndex])
+            mMediaPlayer.setOnCompletionListener { onSkipToNext() }
+            mMediaPlayer.prepare()
+            mMediaPlayer.start()
             Toast.makeText(application, "Next Button is pressed!", Toast.LENGTH_SHORT).show()
         }
 
@@ -73,7 +87,11 @@ class MediaPlaybackService() : MediaBrowserServiceCompat() {
                     val action: Int = event.action
                     if (action == KeyEvent.ACTION_DOWN) {
                         when (event.keyCode) {
-                            KeyEvent.KEYCODE_HEADSETHOOK -> {
+                            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                                onSkipToNext()
+                                isPaused = false
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                                 if (isPaused) {
                                     onPlay()
                                 } else {
@@ -81,19 +99,30 @@ class MediaPlaybackService() : MediaBrowserServiceCompat() {
                                 }
                                 return true
                             }
-                            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> // code for fast forward
-                                return true
-                            KeyEvent.KEYCODE_MEDIA_NEXT -> // code for next
-                                return true
-                            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                                // code for play/pause
-                                Toast.makeText(
-                                    application,
-                                    "Play Button is pressed!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                            KeyEvent.KEYCODE_HEADSETHOOK -> {
+                                if (shouldWait) {
+                                    isDoubleClicked = true
+                                    return true
+                                }
+                                shouldWait = true
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (isDoubleClicked) {
+                                        onSkipToNext()
+                                        isPaused = false
+                                    } else {
+                                        if (isPaused) {
+                                            onPlay()
+                                        } else {
+                                            onPause()
+                                        }
+                                    }
+                                    shouldWait = false
+                                    isDoubleClicked = false
+                                }, 1000)
                                 return true
                             }
+                            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> // code for fast forward
+                                return true
                             KeyEvent.KEYCODE_MEDIA_PREVIOUS -> // code for previous
                                 return true
                             KeyEvent.KEYCODE_MEDIA_REWIND -> // code for rewind
@@ -121,14 +150,11 @@ class MediaPlaybackService() : MediaBrowserServiceCompat() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         MediaButtonReceiver.handleIntent(mediaSession, intent)
 
-        val records = intent?.getStringArrayListExtra("records")
-        records?.firstOrNull()
+        records = intent?.getStringArrayListExtra("records").orEmpty()
 
-        val path = Environment.getExternalStorageDirectory()
-        val file = File(path, records.orEmpty().lastOrNull().orEmpty())
-
-        mMediaPlayer.setDataSource(file.absolutePath)
-        mMediaPlayer.setOnCompletionListener { mMediaPlayer.release() }
+        recordIndex = 0
+        mMediaPlayer.setDataSource(records[recordIndex])
+        mMediaPlayer.setOnCompletionListener { mediaSessionCompatCallBack.onSkipToNext() }
         mMediaPlayer.prepare()
         mMediaPlayer.start()
 
