@@ -61,6 +61,18 @@ class MediaPlaybackService : MediaBrowserServiceCompat() {
 
         override fun onSkipToPrevious() {
             super.onSkipToPrevious()
+
+            recordIndex -= 1
+            if (recordIndex <= 0) {
+                recordIndex = records.size - 1
+            }
+
+            mMediaPlayer.release()
+            mMediaPlayer = MediaPlayer()
+            mMediaPlayer.setDataSource(records[recordIndex])
+            mMediaPlayer.setOnCompletionListener { onSkipToNext() }
+            mMediaPlayer.prepare()
+            mMediaPlayer.start()
             Toast.makeText(application, "Previous Button is pressed!", Toast.LENGTH_SHORT).show()
         }
 
@@ -90,13 +102,28 @@ class MediaPlaybackService : MediaBrowserServiceCompat() {
                             KeyEvent.KEYCODE_MEDIA_NEXT -> {
                                 onSkipToNext()
                                 isPaused = false
+                                return true
                             }
                             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                                if (isPaused) {
-                                    onPlay()
-                                } else {
-                                    onPause()
+                                if (shouldWait) {
+                                    isDoubleClicked = true
+                                    return true
                                 }
+                                shouldWait = true
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (isDoubleClicked) {
+                                        onSkipToPrevious()
+                                        isPaused = false
+                                    } else {
+                                        if (isPaused) {
+                                            onPlay()
+                                        } else {
+                                            onPause()
+                                        }
+                                    }
+                                    shouldWait = false
+                                    isDoubleClicked = false
+                                }, 1000)
                                 return true
                             }
                             KeyEvent.KEYCODE_HEADSETHOOK -> {
@@ -151,7 +178,7 @@ class MediaPlaybackService : MediaBrowserServiceCompat() {
         MediaButtonReceiver.handleIntent(mediaSession, intent)
 
         records = intent?.getStringArrayListExtra("records").orEmpty()
-
+        records = (records as MutableList).sortedBy { it.split('/').last() }
         recordIndex = 0
         mMediaPlayer.setDataSource(records[recordIndex])
         mMediaPlayer.setOnCompletionListener { mediaSessionCompatCallBack.onSkipToNext() }
